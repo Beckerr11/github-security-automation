@@ -1,36 +1,45 @@
-# github-security-automation
+﻿# github-security-automation
 
-Automacao de auditoria de seguranca para repositorios GitHub.
+![CI](https://github.com/Beckerr11/github-security-automation/actions/workflows/ci.yml/badge.svg)
+
+Automacao de seguranca para GitHub.
 
 ## Objetivo
-Construir uma base profissional para portfolio full stack com foco em simplicidade, clareza e evolucao incremental.
+Este repositorio faz parte de uma trilha de portfolio profissional full stack, com foco em simplicidade, clareza e boas praticas.
 
 ## Stack
-Python + GitHub API + GitHub Actions
+Python, GitHub API, auditoria de compliance
 
-## MVP (v0.1)
-- Coleta de alertas
-- Resumo de branch protection
-- Relatorio markdown
-- Checklist automatica
-
-## Estrutura inicial
-- docs/ROADMAP.md: plano de evolucao
-- src/: codigo fonte principal
-- 	ests/: testes iniciais
-- .github/workflows/ci.yml: pipeline minima
+## Funcionalidades implementadas
+- Auditoria de protection, reviews e enforce_admins
+- Coleta de dependabot/code scanning/secret scanning
+- Relatorios JSON/Markdown/CSV
+- Workflow nightly para auditoria automatica
 
 ## Como executar
-Veja as instrucoes no docs/ROADMAP.md e no bloco de setup abaixo.
-`ash
+~~~bash
 python -m venv .venv
-.venv\\Scripts\\Activate.ps1
+. .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
-pytest
-python src/audit.py --help
-`
+python -m pytest -q
+~~~
+
+## Scripts uteis
+- python src/audit.py --help, python -m pytest -q
+
+## Qualidade
+- CI em .github/workflows/ci.yml
+- Dependabot em .github/dependabot.yml
+- Testes locais obrigatorios antes de merge
+
+## Documentacao
+- [Roadmap](docs/ROADMAP.md)
+- [Checklist de producao](docs/PRODUCTION-CHECKLIST.md)
+- [Contribuicao](CONTRIBUTING.md)
+- [Seguranca](SECURITY.md)
+
 ## Status
 - [x] Scaffold inicial
-- [ ] MVP funcional
-- [ ] Deploy publico
-- [ ] Observabilidade e seguranca avancada
+- [x] Base funcional com testes
+- [ ] Deploy publico com observabilidade completa
+- [ ] Versao 1.0.0 com demo publica

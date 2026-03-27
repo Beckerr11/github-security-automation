@@ -1,0 +1,40 @@
+﻿name: Bug report
+description: Reportar um comportamento inesperado
+labels: [bug]
+body:
+  - type: textarea
+    id: contexto
+    attributes:
+      label: Contexto
+      description: O que estava tentando fazer?
+      placeholder: Descreva o objetivo e o fluxo
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passos para reproduzir
+      description: Sequencia minima para reproduzir o problema
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: atual
+    attributes:
+      label: Resultado atual
+    validations:
+      required: true
+  - type: input
+    id: ambiente
+    attributes:
+      label: Ambiente
+      placeholder: local/staging/producao + versao
