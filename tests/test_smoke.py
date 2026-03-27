@@ -8,6 +8,7 @@ def test_compute_compliance_and_risk_score() -> None:
         "branch_protected": False,
         "required_reviews": 0,
         "conversation_resolution": False,
+        "enforce_admins": False,
         "allow_force_push": True,
         "allow_deletions": True,
         "dependabot_open_alerts": 3,
@@ -20,6 +21,7 @@ def test_compute_compliance_and_risk_score() -> None:
     assert compliant is False
     assert "branch_not_protected" in reasons
     assert "secret_scanning_alerts_open" in reasons
+    assert "admin_bypass_allowed" in reasons
     assert compute_risk_score(row) >= 60
 
 
@@ -37,6 +39,7 @@ def test_render_markdown_contains_summary_and_table() -> None:
             "branch_protected": True,
             "required_reviews": 1,
             "conversation_resolution": True,
+            "enforce_admins": True,
             "allow_force_push": False,
             "allow_deletions": False,
             "compliant": True,
@@ -51,7 +54,7 @@ def test_render_markdown_contains_summary_and_table() -> None:
     assert "# GitHub Security Audit - Beckerr11" in output
     assert "- Repos auditados: 1" in output
     assert "| Repository | Visibility | Dependabot |" in output
-    assert "| demo | public | 0 | 0 | 0 | False | True | 1 | True | False | False | ok | 0 |" in output
+    assert "| demo | public | 0 | 0 | 0 | False | True | 1 | True | True | False | False | ok | 0 |" in output
 
 
 def test_build_rows_uses_repo_and_protection_data(monkeypatch) -> None:
@@ -81,6 +84,7 @@ def test_build_rows_uses_repo_and_protection_data(monkeypatch) -> None:
             "protected": True,
             "required_reviews": 1,
             "conversation_resolution": True,
+            "enforce_admins": True,
             "allow_force_push": False,
             "allow_deletions": False,
         }
