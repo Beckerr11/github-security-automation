@@ -33,6 +33,7 @@ python -m pytest -q
 - Testes locais obrigatorios antes de merge
 
 ## Documentacao
+- [Guia de deploy](docs/DEPLOY.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Checklist de producao](docs/PRODUCTION-CHECKLIST.md)
 - [Contribuicao](CONTRIBUTING.md)
@@ -43,3 +44,4 @@ python -m pytest -q
 - [x] Base funcional com testes
 - [ ] Deploy publico com observabilidade completa
 - [ ] Versao 1.0.0 com demo publica
+
