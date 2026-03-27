@@ -1,0 +1,40 @@
+﻿name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente de deploy
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve deploy hook
+        id: hook
+        shell: bash
+        run: |
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            hook="${{ secrets.DEPLOY_HOOK_URL_PRODUCTION }}"
+          else
+            hook="${{ secrets.DEPLOY_HOOK_URL_STAGING }}"
+          fi
+
+          if [ -z "$hook" ]; then
+            echo "Deploy hook nao configurado para o ambiente selecionado." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$hook"
+          echo "url=$hook" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger deploy
+        run: curl -fsS -X POST "${{ steps.hook.outputs.url }}"
