@@ -104,6 +104,7 @@ def fetch_branch_protection(full_name: str, branch: str, token: str | None) -> d
             "protected": False,
             "required_reviews": 0,
             "conversation_resolution": False,
+            "enforce_admins": False,
             "allow_force_push": None,
             "allow_deletions": None,
         }
@@ -119,6 +120,7 @@ def fetch_branch_protection(full_name: str, branch: str, token: str | None) -> d
         "protected": True,
         "required_reviews": required_reviews,
         "conversation_resolution": bool(payload.get("required_conversation_resolution", {}).get("enabled", False)),
+        "enforce_admins": bool(payload.get("enforce_admins", {}).get("enabled", False)),
         "allow_force_push": payload.get("allow_force_pushes", {}).get("enabled"),
         "allow_deletions": payload.get("allow_deletions", {}).get("enabled"),
     }
@@ -157,6 +159,9 @@ def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool, lis
     if row["conversation_resolution"] is not True:
         reasons.append("conversation_resolution_disabled")
 
+    if row["enforce_admins"] is not True:
+        reasons.append("admin_bypass_allowed")
+
     if row["allow_force_push"] is True:
         reasons.append("force_push_allowed")
 
@@ -190,6 +195,8 @@ def compute_risk_score(row: dict[str, Any]) -> int:
         score += 20
     if row["conversation_resolution"] is not True:
         score += 10
+    if row["enforce_admins"] is not True:
+        score += 10
     if row["allow_force_push"] is True:
         score += 15
     if row["allow_deletions"] is True:
@@ -218,6 +225,7 @@ def recommendations_from_reasons(reasons: list[str]) -> list[str]:
         "branch_not_protected": "Ativar branch protection no branch principal.",
         "insufficient_reviews": "Exigir no minimo uma aprovacao de PR.",
         "conversation_resolution_disabled": "Exigir resolucao de conversas antes do merge.",
+        "admin_bypass_allowed": "Ativar enforce admins para impedir bypass de regras.",
         "force_push_allowed": "Desativar force push no branch principal.",
         "branch_deletion_allowed": "Desativar exclusao do branch principal.",
         "dependabot_alerts_open": "Priorizar correcoes de alertas Dependabot.",
@@ -256,6 +264,7 @@ def build_rows(
             "branch_protected": protection.get("protected"),
             "required_reviews": protection.get("required_reviews"),
             "conversation_resolution": protection.get("conversation_resolution"),
+            "enforce_admins": protection.get("enforce_admins"),
             "allow_force_push": protection.get("allow_force_push"),
             "allow_deletions": protection.get("allow_deletions"),
         }
@@ -311,8 +320,8 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
         f"- Repos stale: {summary['stale_repositories']}",
         "",
         "## Detalhes",
-        "| Repository | Visibility | Dependabot | Code Scan | Secret Scan | Stale | Protected | Reviews | Conversation | Force Push | Delete | Compliance | Risk |",
-        "|---|---|---:|---:|---:|---|---|---:|---|---|---|---|---:|",
+        "| Repository | Visibility | Dependabot | Code Scan | Secret Scan | Stale | Protected | Reviews | Conversation | Enforce Admins | Force Push | Delete | Compliance | Risk |",
+        "|---|---|---:|---:|---:|---|---|---:|---|---|---|---|---|---:|",
     ]
 
     for row in rows:
@@ -324,7 +333,7 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
         secret_text = str(secret) if secret is not None else "n/a"
         compliance = "ok" if row["compliant"] else "pendente"
         lines.append(
-            "| {repository} | {visibility} | {dep} | {code} | {secret} | {stale} | {protected} | {reviews} | {conversation} | {force_push} | {deletions} | {compliance} | {risk} |".format(
+            "| {repository} | {visibility} | {dep} | {code} | {secret} | {stale} | {protected} | {reviews} | {conversation} | {enforce_admins} | {force_push} | {deletions} | {compliance} | {risk} |".format(
                 repository=row["repository"],
                 visibility=row["visibility"],
                 dep=dep_text,
@@ -334,6 +343,7 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
                 protected=row["branch_protected"],
                 reviews=row["required_reviews"],
                 conversation=row["conversation_resolution"],
+                enforce_admins=row["enforce_admins"],
                 force_push=row["allow_force_push"],
                 deletions=row["allow_deletions"],
                 compliance=compliance,
@@ -383,6 +393,7 @@ def write_reports(prefix: str, owner: str, rows: list[dict[str, Any]], summary: 
                 "branch_protected",
                 "required_reviews",
                 "conversation_resolution",
+                "enforce_admins",
                 "allow_force_push",
                 "allow_deletions",
                 "compliant",
