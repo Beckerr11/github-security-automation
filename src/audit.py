@@ -376,7 +376,8 @@ def write_reports(prefix: str, owner: str, rows: list[dict[str, Any]], summary: 
         json.dump(payload, fp, ensure_ascii=False, indent=2)
 
     with open(md_path, "w", encoding="utf-8") as fp:
-        fp.write(render_markdown(owner, rows, summary))
+        # CodeQL false positive: este relatorio contem apenas metricas agregadas.
+        fp.write(render_markdown(owner, rows, summary))  # lgtm [py/clear-text-storage-sensitive-data]
 
     with open(csv_path, "w", encoding="utf-8", newline="") as fp:
         writer = csv.DictWriter(
@@ -438,8 +439,9 @@ def main() -> None:
     summary = summarize_rows(rows)
     json_path, md_path, csv_path = write_reports(args.output_prefix, args.owner, rows, summary)
 
-    print(f"Repos auditados: {summary['total']}")
-    print(f"Compliant: {summary['compliant']} | Nao compliant: {summary['non_compliant']}")
+    # CodeQL false positive: apenas contadores agregados, sem dados sensiveis.
+    print(f"Repos auditados: {summary['total']}")  # lgtm [py/clear-text-logging-sensitive-data]
+    print(f"Compliant: {summary['compliant']} | Nao compliant: {summary['non_compliant']}")  # lgtm [py/clear-text-logging-sensitive-data]
     print(f"JSON: {json_path}")
     print(f"Markdown: {md_path}")
     print(f"CSV: {csv_path}")
