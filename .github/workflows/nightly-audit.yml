@@ -1,0 +1,30 @@
+name: Nightly Security Audit
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GH_AUDIT_TOKEN || github.token }}
+      AUDIT_OWNER: ${{ vars.AUDIT_OWNER || github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python src/audit.py --owner "$AUDIT_OWNER" --output-prefix security-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: |
+            security-report.json
+            security-report.md
+            security-report.csv

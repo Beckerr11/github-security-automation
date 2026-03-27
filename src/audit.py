@@ -37,22 +37,59 @@ def fetch_repos(owner: str, token: str | None) -> list[dict[str, Any]]:
             "private": bool(repo.get("private", False)),
             "archived": bool(repo.get("archived", False)),
             "fork": bool(repo.get("fork", False)),
+            "updated_at": repo.get("updated_at"),
         }
         for repo in repos
         if not repo.get("archived") and not repo.get("fork")
     ]
 
 
-def fetch_dependabot_alerts_count(full_name: str, token: str | None) -> int | None:
+def paginated_alert_count(url: str, token: str | None) -> int | None:
     if not token:
         return None
 
-    url = f"{API_BASE}/repos/{full_name}/dependabot/alerts?state=open&per_page=1"
-    response = requests.get(url, headers=build_headers(token), timeout=30)
-    if response.status_code in (403, 404):
-        return None
-    response.raise_for_status()
-    return len(response.json())
+    count = 0
+    next_url = url
+
+    while next_url:
+        response = requests.get(next_url, headers=build_headers(token), timeout=30)
+        if response.status_code in (403, 404):
+            return None
+        response.raise_for_status()
+
+        payload = response.json()
+        if not isinstance(payload, list):
+            return None
+
+        count += len(payload)
+
+        link_header = response.headers.get("Link", "")
+        if 'rel="next"' not in link_header:
+            break
+
+        next_url = ""
+        for part in link_header.split(","):
+            if 'rel="next"' in part:
+                left = part.split(";")[0].strip()
+                next_url = left.strip("<>")
+                break
+
+    return count
+
+
+def fetch_dependabot_alerts_count(full_name: str, token: str | None) -> int | None:
+    url = f"{API_BASE}/repos/{full_name}/dependabot/alerts?state=open&per_page=100"
+    return paginated_alert_count(url, token)
+
+
+def fetch_code_scanning_alerts_count(full_name: str, token: str | None) -> int | None:
+    url = f"{API_BASE}/repos/{full_name}/code-scanning/alerts?state=open&per_page=100"
+    return paginated_alert_count(url, token)
+
+
+def fetch_secret_scanning_alerts_count(full_name: str, token: str | None) -> int | None:
+    url = f"{API_BASE}/repos/{full_name}/secret-scanning/alerts?state=open&per_page=100"
+    return paginated_alert_count(url, token)
 
 
 def fetch_branch_protection(full_name: str, branch: str, token: str | None) -> dict[str, Any]:
@@ -87,6 +124,27 @@ def fetch_branch_protection(full_name: str, branch: str, token: str | None) -> d
     }
 
 
+def parse_iso_datetime(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        return dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def is_repo_stale(updated_at: str | None, stale_days: int) -> bool:
+    parsed = parse_iso_datetime(updated_at)
+    if not parsed:
+        return False
+
+    now = dt.datetime.now(dt.timezone.utc)
+    age = now - parsed.astimezone(dt.timezone.utc)
+    return age.days >= stale_days
+
+
 def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool, list[str]]:
     reasons: list[str] = []
 
@@ -109,6 +167,17 @@ def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool, lis
     if dep is not None and int(dep) > 0:
         reasons.append("dependabot_alerts_open")
 
+    code_scanning = row["code_scanning_open_alerts"]
+    if code_scanning is not None and int(code_scanning) > 0:
+        reasons.append("code_scanning_alerts_open")
+
+    secret_scanning = row["secret_scanning_open_alerts"]
+    if secret_scanning is not None and int(secret_scanning) > 0:
+        reasons.append("secret_scanning_alerts_open")
+
+    if row["stale"]:
+        reasons.append("repository_stale")
+
     return (len(reasons) == 0, reasons)
 
 
@@ -116,7 +185,7 @@ def compute_risk_score(row: dict[str, Any]) -> int:
     score = 0
 
     if row["branch_protected"] is not True:
-        score += 40
+        score += 35
     if int(row["required_reviews"] or 0) == 0:
         score += 20
     if row["conversation_resolution"] is not True:
@@ -128,23 +197,62 @@ def compute_risk_score(row: dict[str, Any]) -> int:
 
     dep = row["dependabot_open_alerts"]
     if dep is not None:
-        score += min(int(dep) * 5, 25)
+        score += min(int(dep) * 4, 20)
+
+    code_scanning = row["code_scanning_open_alerts"]
+    if code_scanning is not None:
+        score += min(int(code_scanning) * 6, 24)
+
+    secret_scanning = row["secret_scanning_open_alerts"]
+    if secret_scanning is not None:
+        score += min(int(secret_scanning) * 8, 24)
+
+    if row["stale"]:
+        score += 8
 
     return min(score, 100)
 
 
-def build_rows(owner: str, repos: list[dict[str, Any]], token: str | None, min_reviews: int = 1) -> list[dict[str, Any]]:
+def recommendations_from_reasons(reasons: list[str]) -> list[str]:
+    mapping = {
+        "branch_not_protected": "Ativar branch protection no branch principal.",
+        "insufficient_reviews": "Exigir no minimo uma aprovacao de PR.",
+        "conversation_resolution_disabled": "Exigir resolucao de conversas antes do merge.",
+        "force_push_allowed": "Desativar force push no branch principal.",
+        "branch_deletion_allowed": "Desativar exclusao do branch principal.",
+        "dependabot_alerts_open": "Priorizar correcoes de alertas Dependabot.",
+        "code_scanning_alerts_open": "Corrigir alertas de code scanning em aberto.",
+        "secret_scanning_alerts_open": "Revogar e rotacionar segredos expostos.",
+        "repository_stale": "Revisar atividade do repo e arquivar se nao for mais usado.",
+    }
+    return [mapping[reason] for reason in reasons if reason in mapping]
+
+
+def build_rows(
+    owner: str,
+    repos: list[dict[str, Any]],
+    token: str | None,
+    min_reviews: int = 1,
+    stale_days: int = 180,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for repo in repos:
         dep_count = fetch_dependabot_alerts_count(repo["full_name"], token)
+        code_scanning_count = fetch_code_scanning_alerts_count(repo["full_name"], token)
+        secret_scanning_count = fetch_secret_scanning_alerts_count(repo["full_name"], token)
         protection = fetch_branch_protection(repo["full_name"], repo["default_branch"], token)
+        stale = is_repo_stale(repo.get("updated_at"), stale_days)
 
         row = {
             "owner": owner,
             "repository": repo["name"],
             "visibility": "private" if repo["private"] else "public",
+            "updated_at": repo.get("updated_at"),
+            "stale": stale,
             "dependabot_open_alerts": dep_count,
+            "code_scanning_open_alerts": code_scanning_count,
+            "secret_scanning_open_alerts": secret_scanning_count,
             "branch_protected": protection.get("protected"),
             "required_reviews": protection.get("required_reviews"),
             "conversation_resolution": protection.get("conversation_resolution"),
@@ -155,6 +263,7 @@ def build_rows(owner: str, repos: list[dict[str, Any]], token: str | None, min_r
         compliant, reasons = compute_compliance(row, min_reviews)
         row["compliant"] = compliant
         row["reasons"] = reasons
+        row["recommendations"] = recommendations_from_reasons(reasons)
         row["risk_score"] = compute_risk_score(row)
 
         rows.append(row)
@@ -168,6 +277,9 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
     non_compliant = total - compliant
     high_risk = sum(1 for row in rows if int(row["risk_score"]) >= 60)
     dep_open = sum(1 for row in rows if (row["dependabot_open_alerts"] or 0) > 0)
+    code_open = sum(1 for row in rows if (row["code_scanning_open_alerts"] or 0) > 0)
+    secret_open = sum(1 for row in rows if (row["secret_scanning_open_alerts"] or 0) > 0)
+    stale = sum(1 for row in rows if row["stale"])
 
     return {
         "total": total,
@@ -175,6 +287,9 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
         "non_compliant": non_compliant,
         "high_risk": high_risk,
         "repos_with_dependabot_alerts": dep_open,
+        "repos_with_code_scanning_alerts": code_open,
+        "repos_with_secret_scanning_alerts": secret_open,
+        "stale_repositories": stale,
     }
 
 
@@ -190,22 +305,32 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
         f"- Compliant: {summary['compliant']}",
         f"- Nao compliant: {summary['non_compliant']}",
         f"- Alto risco (>=60): {summary['high_risk']}",
-        f"- Repos com alertas dependabot: {summary['repos_with_dependabot_alerts']}",
+        f"- Repos com alertas Dependabot: {summary['repos_with_dependabot_alerts']}",
+        f"- Repos com alertas code scanning: {summary['repos_with_code_scanning_alerts']}",
+        f"- Repos com alertas secret scanning: {summary['repos_with_secret_scanning_alerts']}",
+        f"- Repos stale: {summary['stale_repositories']}",
         "",
         "## Detalhes",
-        "| Repository | Visibility | Dependabot Open | Protected | Reviews | Conversation | Force Push | Delete | Compliance | Risk |",
-        "|---|---|---:|---|---:|---|---|---|---|---:|",
+        "| Repository | Visibility | Dependabot | Code Scan | Secret Scan | Stale | Protected | Reviews | Conversation | Force Push | Delete | Compliance | Risk |",
+        "|---|---|---:|---:|---:|---|---|---:|---|---|---|---|---:|",
     ]
 
     for row in rows:
         dep = row["dependabot_open_alerts"]
         dep_text = str(dep) if dep is not None else "n/a"
+        code = row["code_scanning_open_alerts"]
+        code_text = str(code) if code is not None else "n/a"
+        secret = row["secret_scanning_open_alerts"]
+        secret_text = str(secret) if secret is not None else "n/a"
         compliance = "ok" if row["compliant"] else "pendente"
         lines.append(
-            "| {repository} | {visibility} | {dep} | {protected} | {reviews} | {conversation} | {force_push} | {deletions} | {compliance} | {risk} |".format(
+            "| {repository} | {visibility} | {dep} | {code} | {secret} | {stale} | {protected} | {reviews} | {conversation} | {force_push} | {deletions} | {compliance} | {risk} |".format(
                 repository=row["repository"],
                 visibility=row["visibility"],
                 dep=dep_text,
+                code=code_text,
+                secret=secret_text,
+                stale=row["stale"],
                 protected=row["branch_protected"],
                 reviews=row["required_reviews"],
                 conversation=row["conversation_resolution"],
@@ -215,6 +340,12 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
                 risk=row["risk_score"],
             )
         )
+
+    lines.extend(["", "## Top Riscos"])
+    top_rows = sorted(rows, key=lambda row: int(row["risk_score"]), reverse=True)[:5]
+    for row in top_rows:
+        reasons = ", ".join(row["reasons"]) if row["reasons"] else "sem pendencias"
+        lines.append(f"- {row['repository']}: risco {row['risk_score']} ({reasons})")
 
     return "\n".join(lines) + "\n"
 
@@ -244,7 +375,11 @@ def write_reports(prefix: str, owner: str, rows: list[dict[str, Any]], summary: 
                 "owner",
                 "repository",
                 "visibility",
+                "updated_at",
+                "stale",
                 "dependabot_open_alerts",
+                "code_scanning_open_alerts",
+                "secret_scanning_open_alerts",
                 "branch_protected",
                 "required_reviews",
                 "conversation_resolution",
@@ -253,12 +388,14 @@ def write_reports(prefix: str, owner: str, rows: list[dict[str, Any]], summary: 
                 "compliant",
                 "risk_score",
                 "reasons",
+                "recommendations",
             ],
         )
         writer.writeheader()
         for row in rows:
             csv_row = row.copy()
             csv_row["reasons"] = ",".join(row.get("reasons", []))
+            csv_row["recommendations"] = " | ".join(row.get("recommendations", []))
             writer.writerow(csv_row)
 
     return json_path, md_path, csv_path
@@ -270,6 +407,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--token-env", default="GITHUB_TOKEN", help="Nome da variavel de ambiente com token da API")
     parser.add_argument("--output-prefix", default="security-report", help="Prefixo dos arquivos de saida")
     parser.add_argument("--min-reviews", type=int, default=1, help="Quantidade minima de aprovacoes esperadas")
+    parser.add_argument("--stale-days", type=int, default=180, help="Dias sem atividade para marcar repo como stale")
     parser.add_argument("--fail-on-findings", action="store_true", help="Retorna codigo 2 se houver repos nao compliant")
     return parser.parse_args()
 
@@ -279,7 +417,13 @@ def main() -> None:
     token = os.getenv(args.token_env)
 
     repos = fetch_repos(args.owner, token)
-    rows = build_rows(args.owner, repos, token, min_reviews=args.min_reviews)
+    rows = build_rows(
+        args.owner,
+        repos,
+        token,
+        min_reviews=args.min_reviews,
+        stale_days=args.stale_days,
+    )
     summary = summarize_rows(rows)
     json_path, md_path, csv_path = write_reports(args.output_prefix, args.owner, rows, summary)
 
