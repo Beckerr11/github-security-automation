@@ -18,7 +18,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Resolve deploy hook
+      - uses: actions/checkout@v4
+
+      - name: Trigger deploy hook (optional)
         id: hook
         shell: bash
         run: |
@@ -28,13 +30,37 @@ jobs:
             hook="${{ secrets.DEPLOY_HOOK_URL_STAGING }}"
           fi
 
-          if [ -z "$hook" ]; then
-            echo "Deploy hook nao configurado para o ambiente selecionado." >&2
+          if [ -n "$hook" ]; then
+            echo "::add-mask::$hook"
+            curl -fsS -X POST "$hook"
+            echo "used=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "used=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node for Vercel CLI
+        if: steps.hook.outputs.used != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy with Vercel (fallback)
+        if: steps.hook.outputs.used != 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        shell: bash
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Configure DEPLOY_HOOK_URL_* ou VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID." >&2
             exit 1
           fi
 
-          echo "::add-mask::$hook"
-          echo "url=$hook" >> "$GITHUB_OUTPUT"
+          npm i -g vercel@latest
 
-      - name: Trigger deploy
-        run: curl -fsS -X POST "${{ steps.hook.outputs.url }}"
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            vercel deploy --yes --prod --token "$VERCEL_TOKEN"
+          else
+            vercel deploy --yes --token "$VERCEL_TOKEN"
+          fi
