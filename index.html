@@ -4,11 +4,188 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GitHub Security Automation</title>
+  <meta name="description" content="Auditoria automatizada de seguranca e compliance para repositorios GitHub.">
+  <style>
+    :root {
+      --bg: #070b16;
+      --ink: #f6f8ff;
+      --muted: #a9b3c7;
+      --line: rgba(255,255,255,.16);
+      --accent: #7ac8ff;
+      --max: 1100px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: "Sora", "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(980px 600px at 90% -15%, rgba(122,200,255,.24), transparent 58%),
+        radial-gradient(860px 560px at -12% 28%, rgba(255,255,255,.06), transparent 64%),
+        var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+
+    .hero {
+      min-height: 100svh;
+      display: grid;
+      align-content: end;
+      padding: clamp(1.2rem, 2vw, 2rem);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero-inner {
+      max-width: var(--max);
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      gap: 1rem;
+      opacity: 0;
+      transform: translateY(14px);
+      animation: rise .8s ease .1s forwards;
+    }
+
+    .kicker {
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: .72rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 8vw, 5rem);
+      line-height: .95;
+      letter-spacing: -.03em;
+      max-width: 12ch;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 2.6vw, 1.24rem);
+      max-width: 52ch;
+    }
+
+    .actions {
+      display: flex;
+      gap: .72rem;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      text-decoration: none;
+      color: var(--ink);
+      padding: .78rem 1.05rem;
+      font-size: .9rem;
+      font-weight: 600;
+      transition: transform .22s ease, border-color .22s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--accent) 70%, white 30%);
+    }
+
+    .btn.primary {
+      background: color-mix(in srgb, var(--accent) 32%, transparent);
+      border-color: color-mix(in srgb, var(--accent) 78%, white 22%);
+    }
+
+    .section {
+      max-width: var(--max);
+      margin: 0 auto;
+      width: 100%;
+      padding: clamp(1.2rem, 2.2vw, 2.5rem) clamp(1.2rem, 2vw, 2rem);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-head {
+      margin: 0 0 .8rem 0;
+      font-size: clamp(1.14rem, 2.1vw, 1.8rem);
+      letter-spacing: -.02em;
+      max-width: 32ch;
+    }
+
+    .list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--line);
+    }
+
+    .list li {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: .72rem;
+      align-items: baseline;
+      border-bottom: 1px solid var(--line);
+      padding: .72rem 0;
+    }
+
+    .tag {
+      min-width: 3.8rem;
+      text-align: center;
+      border: 1px solid var(--line);
+      color: var(--accent);
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      padding: .25rem .42rem;
+    }
+
+    .path {
+      font-family: "IBM Plex Mono", "Consolas", monospace;
+      color: #e6ecff;
+      font-size: .85rem;
+      word-break: break-word;
+    }
+
+    .meta {
+      margin-top: .9rem;
+      border-top: 1px solid var(--line);
+      padding-top: .8rem;
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
+    @keyframes rise {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 800px) {
+      .hero { align-content: center; }
+      .list li { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-  <main>
-    <h1>GitHub Security Automation</h1>
-    <p>Repositorio utilitario para auditoria de seguranca de repositorios GitHub.</p>
-  </main>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="kicker">security operations</p>
+      <h1>GitHub Security Automation</h1>
+      <p class="subtitle">Auditoria automatizada de branch protection, code scanning, dependabot e secret scanning com relatorios acionaveis.</p>
+      <div class="actions">
+        <a class="btn primary" href="/health">Ver health</a>
+        <a class="btn" href="#pipeline">Pipeline de auditoria</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="section" id="pipeline">
+    <h2 class="section-head">Pipeline pronto para rodar em CI e gerar inteligencia de risco em JSON, Markdown e CSV.</h2>
+    <ul class="list">
+      <li><span class="tag">CLI</span><span class="path">python src/audit.py --owner Beckerr11 --output-prefix security-report</span></li>
+      <li><span class="tag">CI</span><span class="path">.github/workflows/ci.yml</span></li>
+      <li><span class="tag">NIGHTLY</span><span class="path">.github/workflows/nightly-audit.yml</span></li>
+      <li><span class="tag">OUT</span><span class="path">security-report.json / .md / .csv</span></li>
+    </ul>
+    <p class="meta">Frontend estatico responsivo para apresentar o produto e seu fluxo operacional.</p>
+  </section>
 </body>
 </html>
