@@ -4,12 +4,19 @@
     {
       "src": "api/health.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
       "src": "/health",
       "dest": "api/health.js"
+    },
+    {
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
