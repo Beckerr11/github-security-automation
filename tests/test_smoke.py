@@ -4,6 +4,7 @@ from src.audit import (
     build_rows,
     compute_compliance,
     compute_risk_score,
+    fetch_branch_protection,
     fetch_repos,
     render_markdown,
     summarize_rows,
@@ -107,6 +108,26 @@ def test_fetch_repos_paginates_until_no_next_link(monkeypatch) -> None:
     repos = fetch_repos("Beckerr11", "token")
     assert [repo["name"] for repo in repos] == ["repo-a", "repo-b"]
     assert len(calls) == 2
+
+
+def test_branch_protection_403_returns_unknown_evidence(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 403
+
+        def raise_for_status(self) -> None:
+            raise AssertionError("403 must be represented as unknown evidence")
+
+    monkeypatch.setattr("src.audit.requests.get", lambda *args, **kwargs: FakeResponse())
+
+    result = fetch_branch_protection("Beckerr11/demo", "main", "token")
+    assert result == {
+        "protected": None,
+        "required_reviews": None,
+        "conversation_resolution": None,
+        "enforce_admins": None,
+        "allow_force_push": None,
+        "allow_deletions": None,
+    }
 
 
 def test_render_markdown_contains_summary_and_table() -> None:
