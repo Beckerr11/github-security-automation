@@ -8,7 +8,7 @@ O projeto consulta a GitHub API, normaliza sinais de proteção e gera saídas e
 
 ## O que é analisado
 
-Para cada repositório acessível, a auditoria pode verificar:
+A listagem de repositórios segue a paginação da GitHub API, em vez de parar nos primeiros 100 resultados. Para cada repositório retornado pela API para o owner consultado, a auditoria pode verificar:
 
 - proteção do branch principal;
 - quantidade mínima de reviews;
@@ -20,7 +20,15 @@ Para cada repositório acessível, a auditoria pode verificar:
 - alertas de secret scanning;
 - repositórios sem atividade além do limite configurado.
 
-Quando um endpoint exige permissões que o token não possui, o valor é tratado como **indisponível (`n/a`)**, em vez de ser inventado como seguro ou inseguro.
+## Modelo de evidência
+
+A classificação distingue três estados:
+
+- **compliant** — todos os sinais necessários foram observados e atendem aos critérios;
+- **non-compliant** — existe ao menos um finding explícito, como branch sem proteção ou alerta aberto;
+- **evidência insuficiente** — a API não forneceu todos os sinais necessários para concluir, por exemplo por falta de token, permissão `403` ou recurso indisponível.
+
+Dados indisponíveis aparecem como `n/a`, não recebem penalidade artificial no `risk_score` e, sozinhos, não fazem `--fail-on-findings` falhar.
 
 ## Saídas
 
@@ -32,7 +40,7 @@ security-report.md
 security-report.csv
 ```
 
-O resumo inclui total analisado, quantidade de repositórios aprovados pelos critérios configurados, pendências, alto risco, alertas e repositórios stale.
+O resumo inclui total analisado, quantidade compliant, non-compliant, evidência insuficiente, alto risco, alertas e repositórios stale.
 
 > O `risk_score` é uma heurística operacional deste projeto. Ele não substitui auditoria de segurança, pentest, certificação ou framework formal de compliance.
 
@@ -75,22 +83,23 @@ python src/audit.py \
   --fail-on-findings
 ```
 
-`--fail-on-findings` encerra com código `2` quando os critérios configurados encontram repositórios pendentes, permitindo usar a ferramenta como gate automatizado.
+`--fail-on-findings` encerra com código `2` somente quando há repositórios **non-compliant** pelos critérios configurados. Repositórios sem evidência suficiente permanecem separados para revisão manual.
 
 ## Arquitetura
 
 ```text
 GitHub API
    │
-   ├── repositories
+   ├── paginated repositories
    ├── branch protection
    ├── Dependabot alerts
    ├── code scanning alerts
    └── secret scanning alerts
    │
    ▼
-normalização + critérios
+normalização de evidência
    │
+   ├── compliant / non-compliant / unknown
    ├── reasons
    ├── recommendations
    └── risk_score
@@ -102,8 +111,9 @@ JSON · Markdown · CSV
 ## Engenharia e segurança
 
 - requests com timeout explícito;
-- paginação de alertas;
-- ausência de token tratada sem simular evidência;
+- paginação de repositórios e alertas;
+- ausência de token/permissão tratada como evidência indisponível;
+- `403` de branch protection não é convertido em falso finding;
 - recomendações derivadas de motivos explícitos;
 - testes com Pytest;
 - CI no GitHub Actions;
@@ -121,7 +131,7 @@ JSON · Markdown · CSV
 
 ## Limites
 
-A ferramenta avalia somente sinais disponíveis pela GitHub API e pelas permissões concedidas ao token. Um repositório marcado como aprovado pelos critérios configurados **não é garantia de ausência de vulnerabilidades**.
+A ferramenta avalia somente sinais disponíveis pela GitHub API e pelas permissões concedidas ao token. Um repositório marcado como compliant **não é garantia de ausência de vulnerabilidades**; significa apenas que os critérios implementados e observáveis nesta ferramenta foram atendidos.
 
 ## Autor
 
