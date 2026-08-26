@@ -23,11 +23,27 @@ def build_headers(token: str | None) -> dict[str, str]:
     return headers
 
 
+def next_link(link_header: str) -> str:
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            left = part.split(";")[0].strip()
+            return left.strip("<>")
+    return ""
+
+
 def fetch_repos(owner: str, token: str | None) -> list[dict[str, Any]]:
-    url = f"{API_BASE}/users/{owner}/repos?per_page=100&sort=updated"
-    response = requests.get(url, headers=build_headers(token), timeout=30)
-    response.raise_for_status()
-    repos = response.json()
+    next_url = f"{API_BASE}/users/{owner}/repos?per_page=100&sort=updated"
+    repos: list[dict[str, Any]] = []
+
+    while next_url:
+        response = requests.get(next_url, headers=build_headers(token), timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("GitHub repositories response must be a list")
+
+        repos.extend(payload)
+        next_url = next_link(response.headers.get("Link", ""))
 
     return [
         {
@@ -62,17 +78,7 @@ def paginated_alert_count(url: str, token: str | None) -> int | None:
             return None
 
         count += len(payload)
-
-        link_header = response.headers.get("Link", "")
-        if 'rel="next"' not in link_header:
-            break
-
-        next_url = ""
-        for part in link_header.split(","):
-            if 'rel="next"' in part:
-                left = part.split(";")[0].strip()
-                next_url = left.strip("<>")
-                break
+        next_url = next_link(response.headers.get("Link", ""))
 
     return count
 
@@ -92,12 +98,26 @@ def fetch_secret_scanning_alerts_count(full_name: str, token: str | None) -> int
     return paginated_alert_count(url, token)
 
 
+def unknown_protection() -> dict[str, Any]:
+    return {
+        "protected": None,
+        "required_reviews": None,
+        "conversation_resolution": None,
+        "enforce_admins": None,
+        "allow_force_push": None,
+        "allow_deletions": None,
+    }
+
+
 def fetch_branch_protection(full_name: str, branch: str, token: str | None) -> dict[str, Any]:
     if not token:
-        return {"protected": None}
+        return unknown_protection()
 
     url = f"{API_BASE}/repos/{full_name}/branches/{branch}/protection"
     response = requests.get(url, headers=build_headers(token), timeout=30)
+
+    if response.status_code == 403:
+        return unknown_protection()
 
     if response.status_code == 404:
         return {
@@ -147,19 +167,20 @@ def is_repo_stale(updated_at: str | None, stale_days: int) -> bool:
     return age.days >= stale_days
 
 
-def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool, list[str]]:
+def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool | None, list[str]]:
     reasons: list[str] = []
 
-    if row["branch_protected"] is not True:
+    if row["branch_protected"] is False:
         reasons.append("branch_not_protected")
 
-    if int(row["required_reviews"] or 0) < min_reviews:
+    required_reviews = row["required_reviews"]
+    if required_reviews is not None and int(required_reviews) < min_reviews:
         reasons.append("insufficient_reviews")
 
-    if row["conversation_resolution"] is not True:
+    if row["conversation_resolution"] is False:
         reasons.append("conversation_resolution_disabled")
 
-    if row["enforce_admins"] is not True:
+    if row["enforce_admins"] is False:
         reasons.append("admin_bypass_allowed")
 
     if row["allow_force_push"] is True:
@@ -183,19 +204,43 @@ def compute_compliance(row: dict[str, Any], min_reviews: int) -> tuple[bool, lis
     if row["stale"]:
         reasons.append("repository_stale")
 
-    return (len(reasons) == 0, reasons)
+    evidence_fields = (
+        "branch_protected",
+        "required_reviews",
+        "conversation_resolution",
+        "enforce_admins",
+        "allow_force_push",
+        "allow_deletions",
+        "dependabot_open_alerts",
+        "code_scanning_open_alerts",
+        "secret_scanning_open_alerts",
+    )
+    evidence_unavailable = any(row.get(field) is None for field in evidence_fields)
+
+    if reasons:
+        if evidence_unavailable:
+            reasons.append("evidence_unavailable")
+        return False, reasons
+
+    if evidence_unavailable:
+        return None, ["evidence_unavailable"]
+
+    return True, []
 
 
 def compute_risk_score(row: dict[str, Any]) -> int:
     score = 0
 
-    if row["branch_protected"] is not True:
+    if row["branch_protected"] is False:
         score += 35
-    if int(row["required_reviews"] or 0) == 0:
+
+    required_reviews = row["required_reviews"]
+    if required_reviews is not None and int(required_reviews) == 0:
         score += 20
-    if row["conversation_resolution"] is not True:
+
+    if row["conversation_resolution"] is False:
         score += 10
-    if row["enforce_admins"] is not True:
+    if row["enforce_admins"] is False:
         score += 10
     if row["allow_force_push"] is True:
         score += 15
@@ -232,6 +277,7 @@ def recommendations_from_reasons(reasons: list[str]) -> list[str]:
         "code_scanning_alerts_open": "Corrigir alertas de code scanning em aberto.",
         "secret_scanning_alerts_open": "Revogar e rotacionar segredos expostos.",
         "repository_stale": "Revisar atividade do repo e arquivar se nao for mais usado.",
+        "evidence_unavailable": "Conceder permissao de leitura ou habilitar o recurso para completar a evidencia da auditoria.",
     }
     return [mapping[reason] for reason in reasons if reason in mapping]
 
@@ -282,8 +328,9 @@ def build_rows(
 
 def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
     total = len(rows)
-    compliant = sum(1 for row in rows if row["compliant"])
-    non_compliant = total - compliant
+    compliant = sum(1 for row in rows if row["compliant"] is True)
+    non_compliant = sum(1 for row in rows if row["compliant"] is False)
+    unknown = sum(1 for row in rows if row["compliant"] is None)
     high_risk = sum(1 for row in rows if int(row["risk_score"]) >= 60)
     dep_open = sum(1 for row in rows if (row["dependabot_open_alerts"] or 0) > 0)
     code_open = sum(1 for row in rows if (row["code_scanning_open_alerts"] or 0) > 0)
@@ -294,6 +341,7 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
         "total": total,
         "compliant": compliant,
         "non_compliant": non_compliant,
+        "unknown": unknown,
         "high_risk": high_risk,
         "repos_with_dependabot_alerts": dep_open,
         "repos_with_code_scanning_alerts": code_open,
@@ -313,6 +361,7 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
         f"- Repos auditados: {summary['total']}",
         f"- Compliant: {summary['compliant']}",
         f"- Nao compliant: {summary['non_compliant']}",
+        f"- Evidencia insuficiente: {summary['unknown']}",
         f"- Alto risco (>=60): {summary['high_risk']}",
         f"- Repos com alertas Dependabot: {summary['repos_with_dependabot_alerts']}",
         f"- Repos com alertas code scanning: {summary['repos_with_code_scanning_alerts']}",
@@ -331,7 +380,13 @@ def render_markdown(owner: str, rows: list[dict[str, Any]], summary: dict[str, i
         code_text = str(code) if code is not None else "n/a"
         secret = row["secret_scanning_open_alerts"]
         secret_text = str(secret) if secret is not None else "n/a"
-        compliance = "ok" if row["compliant"] else "pendente"
+        if row["compliant"] is True:
+            compliance = "ok"
+        elif row["compliant"] is False:
+            compliance = "pendente"
+        else:
+            compliance = "evidencia insuficiente"
+
         lines.append(
             "| {repository} | {visibility} | {dep} | {code} | {secret} | {stale} | {protected} | {reviews} | {conversation} | {enforce_admins} | {force_push} | {deletions} | {compliance} | {risk} |".format(
                 repository=row["repository"],
@@ -441,7 +496,10 @@ def main() -> None:
 
     # CodeQL false positive: apenas contadores agregados, sem dados sensiveis.
     print(f"Repos auditados: {summary['total']}")  # lgtm [py/clear-text-logging-sensitive-data]
-    print(f"Compliant: {summary['compliant']} | Nao compliant: {summary['non_compliant']}")  # lgtm [py/clear-text-logging-sensitive-data]
+    print(
+        f"Compliant: {summary['compliant']} | Nao compliant: {summary['non_compliant']} | "
+        f"Evidencia insuficiente: {summary['unknown']}"
+    )  # lgtm [py/clear-text-logging-sensitive-data]
     print(f"JSON: {json_path}")
     print(f"Markdown: {md_path}")
     print(f"CSV: {csv_path}")
