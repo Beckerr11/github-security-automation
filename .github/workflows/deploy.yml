@@ -1,4 +1,4 @@
-﻿name: Deploy
+name: Deploy
 
 on:
   workflow_dispatch:
@@ -11,14 +11,16 @@ on:
           - staging
           - production
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Trigger deploy hook (optional)
         id: hook
@@ -40,9 +42,9 @@ jobs:
 
       - name: Setup Node for Vercel CLI
         if: steps.hook.outputs.used != 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Deploy with Vercel (fallback)
         if: steps.hook.outputs.used != 'true'
